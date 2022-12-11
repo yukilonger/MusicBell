@@ -1,6 +1,7 @@
 package com.example.musicbell
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Environment
@@ -29,9 +30,13 @@ import java.io.FilenameFilter
 class MainActivity : ComponentActivity() {
     val musicFiles = mutableListOf<File>()
     val permissions = arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    val playMode = PlayMode.Random
+    val playMode = PlayMode.Single
     var videoIndex = 0
+    var videoPrevIndex = 0
+    var prevY = 0f
+    var minMoveY = 10f
 
+    @SuppressLint("ClickableViewAccessibility", "ResourceAsColor")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.main)
@@ -61,19 +66,18 @@ class MainActivity : ComponentActivity() {
         val mediaController = MediaController(this)
         mediaController.setAnchorView(player)
         player.setMediaController(mediaController)
-        player.setVideoPath(musicFiles[videoIndex].path)
+        player.setOnPreparedListener {
+
+        }
         player.setOnCompletionListener {
             when(playMode) {
+                PlayMode.Single -> {
+                    player.start()
+                }
                 PlayMode.Random -> {
-                    var maxIndex = musicFiles.size - 1
-                    videoIndex = Utility.GetRandomIndex(maxIndex)
-                    if (videoIndex > maxIndex){
-                        videoIndex = 0
-                    }
+                    playNext()
                 }
             }
-            player.setVideoPath(musicFiles[videoIndex].path)
-            player.start()
         }
         // 控制按钮
         val buttonAddAlarm = findViewById<ImageView>(R.id.add_alarm)
@@ -89,7 +93,7 @@ class MainActivity : ComponentActivity() {
                 player.pause()
             }
             else {
-                player.start()
+                player.resume()
             }
         }
 
@@ -99,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
         textMusicName.setOnClickListener {
             viewPlayer.isVisible = true
-            player.start()
+            play()
         }
 
         buttonMusicList.setOnClickListener {
@@ -110,6 +114,26 @@ class MainActivity : ComponentActivity() {
             when(event.action){
                 MotionEvent.ACTION_DOWN ->
                 {
+                    prevY = event.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE ->
+                {
+                    true
+                }
+                MotionEvent.ACTION_UP ->
+                {
+                    val distance = Math.abs(prevY - event.y)
+                    if (distance > minMoveY) {
+                        if(prevY > event.y){
+                            // 下滑
+                            playNext()
+                        }
+                        else if (prevY < event.y){
+                            // 上滑
+                            playPrev()
+                        }
+                    }
                     true
                 }
                 else -> {
@@ -117,6 +141,35 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun playNext(){
+        var maxIndex = musicFiles.size - 1
+        videoPrevIndex = videoIndex
+        videoIndex = Utility.GetRandomIndex(maxIndex)
+        if (videoIndex > maxIndex){
+            videoIndex = 0
+        }
+        play()
+    }
+
+    private fun playPrev(){
+        if (videoIndex == videoPrevIndex)
+            return
+        videoIndex = videoPrevIndex
+        play()
+    }
+
+    private fun play(){
+        val player = findViewById<VideoView>(R.id.player)
+        player.stopPlayback()
+        player.setVideoPath(musicFiles[videoIndex].path)
+        player.start()
+    }
+
+    override fun onStop(){
+        super.onStop()
+        play()
     }
 }
 

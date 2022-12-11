@@ -4,6 +4,5 @@
     <style name="Theme.MusicBell" parent="android:Theme.Material.Light.LightStatusBar">
         <item name="android:windowTranslucentStatus">true</item>
         <item name="android:windowNoTitle">true</item>
-        <item name="android:fitsSystemWindows">true</item>
     </style>
 </resources>

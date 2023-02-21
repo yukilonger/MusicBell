@@ -2,24 +2,19 @@ package com.example.musicbell
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ComponentName
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
+import android.os.*
 import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.widget.ImageView
-import android.widget.MediaController
 import android.widget.RelativeLayout
-import android.widget.TextView
-import android.widget.VideoView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.MaterialTheme
-import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.app.ActivityCompat
 import androidx.core.view.isVisible
@@ -30,17 +25,42 @@ import java.io.FilenameFilter
 class MainActivity : ComponentActivity() {
     val musicFiles = mutableListOf<File>()
     val permissions = arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    val playMode = PlayMode.Single
+    var musicBinder: IBinder? = null
+    var musicService: MusicService? = null
+    var holder: SurfaceHolder? = null
     var videoIndex = 0
     var videoPrevIndex = 0
     var prevY = 0f
     var minMoveY = 10f
+    val prevIndexes = mutableListOf<Int>() // 已播放歌曲的索引
+    var currentPrevIndex = -1
+    var isRandom = true // 播放下一曲为随机模式，播放上一曲后变为有序模式，直到返回到已播放歌曲索引的最后再播放下一曲时恢复随机模式
+    var isInitialization: Boolean = true
+
+    private val connection: ServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            musicBinder = service
+            val localBinder = service as MusicService.MyBinder
+            musicService = localBinder.getService()
+            val html = findViewById<RelativeLayout>(R.id.html)
+            holder?.let {
+                musicService?.initialization(it, html.width, html.height) {
+                    playNext()
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            musicBinder = null
+        }
+    }
 
     @SuppressLint("ClickableViewAccessibility", "ResourceAsColor")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.main)
 
+        // 读取Music文件夹
         val readPermission = ActivityCompat.checkSelfPermission(this, permissions[0]) != PackageManager.PERMISSION_GRANTED
         if (readPermission) {
             if (ActivityCompat.shouldShowRequestPermissionRationale(this, permissions[0])) {
@@ -51,7 +71,6 @@ class MainActivity : ComponentActivity() {
                 requestPermissions(permissions, 1)
             }
         }
-        // 读取Music文件夹
         val dir = Environment.getExternalStorageDirectory().absolutePath
         val musicFolder = File("${dir}/Music")
         if (musicFolder.exists()) {
@@ -61,53 +80,33 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 初始化播放器
-        val player = findViewById<VideoView>(R.id.player)
-        val mediaController = MediaController(this)
-        mediaController.setAnchorView(player)
-        player.setMediaController(mediaController)
-        player.setOnPreparedListener {
-
-        }
-        player.setOnCompletionListener {
-            when(playMode) {
-                PlayMode.Single -> {
-                    player.start()
-                }
-                PlayMode.Random -> {
+        // 视频播放
+        val bindIntent = Intent(this, MusicService::class.java)
+        startService(bindIntent)
+        bindService(bindIntent, connection, BIND_AUTO_CREATE)
+        val viewPlayer = findViewById<RelativeLayout>(R.id.view_player)
+        val player = findViewById<SurfaceView>(R.id.player)
+        holder = player.holder
+        holder?.addCallback(object : SurfaceHolder.Callback{
+            override fun surfaceCreated(p0: SurfaceHolder) {
+                musicService?.display(p0)
+                if(musicService?.isPlaying() == false){
                     playNext()
                 }
             }
-        }
-        // 控制按钮
-        val buttonAddAlarm = findViewById<ImageView>(R.id.add_alarm)
-        val textMusicName = findViewById<TextView>(R.id.text_music_name)
+
+            override fun surfaceChanged(p0: SurfaceHolder, p1: Int, p2: Int, p3: Int) {
+
+            }
+
+            override fun surfaceDestroyed(p0: SurfaceHolder) {
+            }
+
+        })
+
         val buttonMusicControl = findViewById<ImageView>(R.id.button_music_control)
-        val buttonMusicList = findViewById<ImageView>(R.id.button_music_list)
-        val viewAlarms = findViewById<RelativeLayout>(R.id.view_alarms)
-        val viewPlayer = findViewById<RelativeLayout>(R.id.view_player)
-        val viewList = findViewById<RelativeLayout>(R.id.view_music_list)
-
         buttonMusicControl.setOnClickListener{
-            if (player.isPlaying) {
-                player.pause()
-            }
-            else {
-                player.resume()
-            }
-        }
-
-        buttonAddAlarm.setOnClickListener {
-            viewAlarms.isVisible = true
-        }
-
-        textMusicName.setOnClickListener {
             viewPlayer.isVisible = true
-            play()
-        }
-
-        buttonMusicList.setOnClickListener {
-            viewList.isVisible = true
         }
 
         viewPlayer.setOnTouchListener { v, event ->
@@ -144,32 +143,65 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playNext(){
-        var maxIndex = musicFiles.size - 1
-        videoPrevIndex = videoIndex
-        videoIndex = Utility.GetRandomIndex(maxIndex)
-        if (videoIndex > maxIndex){
-            videoIndex = 0
+        if(!isRandom && videoIndex == prevIndexes.lastIndex) {
+            isRandom = true
         }
+
+        if(isRandom) {
+            // 随机模式
+            var maxIndex = musicFiles.size - 1
+            videoIndex = Utility.GetRandomIndex(maxIndex)
+            if (videoIndex > maxIndex){
+                videoIndex = 0
+            }
+            prevIndexes.add(videoIndex)
+        }
+        else {
+            // 有序模式
+            currentPrevIndex++
+            videoIndex = prevIndexes[currentPrevIndex]
+        }
+
         play()
     }
 
     private fun playPrev(){
+        if(isRandom) {
+            isRandom = false
+            currentPrevIndex = prevIndexes.lastIndex
+        }
+        else{
+            currentPrevIndex--
+        }
+
+        if(currentPrevIndex < 0)
+            return
+
+        videoIndex = prevIndexes[currentPrevIndex]
+
         if (videoIndex == videoPrevIndex)
             return
-        videoIndex = videoPrevIndex
+
         play()
     }
 
     private fun play(){
-        val player = findViewById<VideoView>(R.id.player)
-        player.stopPlayback()
-        player.setVideoPath(musicFiles[videoIndex].path)
-        player.start()
-    }
+        //发送的数据
+        val data = Parcel.obtain()
+        //返回的数据
+        val reply = Parcel.obtain()
 
-    override fun onStop(){
-        super.onStop()
-        play()
+        try {
+            data.writeInterfaceToken("MusicService")
+            data.writeString(musicFiles[videoIndex].path)
+            musicBinder!!.transact(MusicService.ServiceCode.SetPath.value, data, null, 0)
+            musicBinder!!.transact(MusicService.ServiceCode.Play.value, data, null, 0)
+        } catch (e: RemoteException) {
+            e.printStackTrace()
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
     }
 }
 

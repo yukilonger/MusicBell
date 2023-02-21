@@ -9,4 +9,5 @@
     <color name="background_default">#f8f9fd</color>
     <color name="background_toolbar">#F2F8F9FD</color>
     <color name="background_popups">#80000000</color>
+    <color name="button_normal">#594d9c</color>
 </resources>

@@ -44,7 +44,7 @@ class MusicService : Service() {
 
     fun destroy(){
         mediaPlayer.stop()
-        mediaPlayer.release()
+//        mediaPlayer.release()
     }
 
     fun setSource(path:String?){
